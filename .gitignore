@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+work/
+*.uasset
+*.umap
+*.mod
+*.z
+*.sav
+*.exe
+*.dll
+*.zip
+*.log
+.DS_Store

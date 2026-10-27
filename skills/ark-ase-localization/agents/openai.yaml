@@ -1,0 +1,4 @@
+interface:
+  display_name: "方舟 ASE 模组汉化"
+  short_description: "方舟进化模组汉化、UI文本提取、资源写回与覆盖补丁验证"
+  default_prompt: "使用 $ark-ase-localization 汉化我提供的 ASE 模组，并提供清单、验证报告和可回滚补丁。"

@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-26",
+  "platform_actually_tested": "Windows, Python 3.12",
+  "unit_and_cli_tests_passed": 14,
+  "skill_frontmatter_validated": true,
+  "synthetic_forward_test": {
+    "profiles": ["402/7", "404/10"],
+    "files": 2,
+    "edited_fields": 12,
+    "json_text_occurrences": 2,
+    "unique_translation_pairs": 6,
+    "inverse_and_archive_verified": true,
+    "independent_export": "not_run_no_tool_supplied",
+    "game_tested": false
+  },
+  "local_real_asset_regression": {
+    "files": 661,
+    "edited_fields": 1207,
+    "inverse_byte_verified": true,
+    "outputs_identical_to_previously_independently_exported_assets": 660,
+    "remaining_output_fresh_independent_export_fields": 4,
+    "fresh_independent_export_missing": 0
+  },
+  "game_tested": false,
+  "game_installed": false,
+  "github_ci_executed": false,
+  "game_or_mod_assets_included": false
+}
