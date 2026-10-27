@@ -41,5 +41,6 @@ python scripts/ase_localize.py package --source "./work/original" --overlay "./w
 - `DinoNameTag`、对象名、NameMap、函数名、资源路径属于内部标识；扫描器显示英文不构成修改它们的理由。
 - 第三方工具 M2 在本流程中用于工作副本的**只读导出**；没有独立验证的 M2 全量导入不应直接用于烹饪资源。
 - 新增 Nucleus `ZH` 词条时保留 `EN` 和 `Key`；已有用户语言或自定义译文可能覆盖默认值。不要删除存档来强行切语言。
+- 中英文都显示 `_KEY_` 时，核对查表链和游戏本地化资源是否意外翻译了内部字段名；参见 [UI 与 JSON](references/ui-and-json.md) 中的实际案例。不能把个案假设当作通用原因。
 - 附带写入器不支持 Kismet 改写、任意 Struct/Array/Map、复杂 FText 历史、纹理文字、ASA、Linux 资源跨平台套用。遇到这些情况报告剩余项，改走已验证的专用工具或 DevKit 路线。
 - 参考 [两个实测案例](references/case-studies.md) 学习适用范围；案例数字和术语不是新模组的预期结果。
