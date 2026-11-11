@@ -1,5 +1,5 @@
 """Path normalization and preflight. Samples are synthetic directories, not game files."""
-import argparse,hashlib,json,os,subprocess,sys,tempfile,unittest,unittest.mock
+import argparse,contextlib,hashlib,io,json,os,subprocess,sys,tempfile,unittest,unittest.mock
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'skills'/'ark-ase-localization'/'scripts'))
 import ase_localize
@@ -219,5 +219,76 @@ class PreflightTests(unittest.TestCase):
             self.assertFalse(saved['game_tested']); self.assertIn('Not an in-game test',saved['note'])
             self.run_cli('install','--game',game,'--overlay',overlay,'--id','42','--backup',root/'backup-again')
             self.assertEqual((mods/'example.uasset').read_bytes(),b'patched')
+            fresh=make_overlay(root/'fresh',[('nested/example.uasset',b'original',b'patched')])
+            self.run_cli('install','--game',game,'--overlay',fresh,'--id','7','--backup',root/'backup-new')
+            created=game/'ShooterGame'/'Content'/'Mods'/'7'/'nested'/'example.uasset'
+            self.assertEqual(created.read_bytes(),b'patched')
+            created_manifest=json.loads((root/'backup-new'/'backup_manifest.json').read_text(encoding='utf-8'))
+            self.assertEqual(created_manifest['files'][0]['action'],'created')
+            self.assertFalse((root/'backup-new'/'nested'/'example.uasset').exists())
+
+class ReexportPreflightTests(unittest.TestCase):
+    def test_python_exporter_uses_interpreter_and_resolved_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'runneradmin'/'ARK')
+            tool=root/'runneradmin'/'export_tool'
+            tool.write_text("#!/usr/bin/env python3\nimport pathlib,sys\n"
+                            "target=pathlib.Path(sys.argv[2])\n"
+                            "pathlib.Path(str(target)+'.txt').write_text('k=patched\\n',encoding='utf-8')\n",
+                            encoding='utf-8')
+            tool.chmod(0o644)
+            resolved,argv=ase_localize.tool_command(root/'RUNNER~1'/'export_tool')
+            self.assertEqual(argv[0],sys.executable)
+            self.assertTrue(ase_localize.same_path(resolved,tool))
+            self.assertTrue(ase_localize.same_path(argv[1],root/'RUNNER~1'/'export_tool'))
+            exe=root/'UE4localizationsTool.exe'; exe.write_bytes(b'MZ-stand-in')
+            _exe,exe_argv=ase_localize.tool_command(exe)
+            self.assertEqual(exe_argv,[str(_exe)])
+            overlay=make_overlay(root/'overlay',[('example.uasset',b'original',b'patched')])
+            manifest=json.loads((overlay/'manifest.json').read_text(encoding='utf-8'))
+            manifest['files'][0]['edits']=[{'translation':'patched','key':'Name','export_index':0}]
+            (overlay/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
+            import tool_reexport
+            work=root/'work'; stdout=io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code=tool_reexport.main(['--tool',str(root/'RUNNER~1'/'export_tool'),'--overlay',str(overlay),
+                                         '--work',str(work),'--game',str(root/'RUNNER~1'/'ARK')])
+            self.assertEqual(code,0,stdout.getvalue())
+            report=json.loads((work/'reexport_report.json').read_text(encoding='utf-8'))
+            self.assertEqual(report['matched_fields'],1); self.assertFalse(report['game_tested'])
+            self.assertEqual(report['failures'],[]); self.assertEqual(report['missing'],[])
+            self.assertEqual((game/'Tools'/'LocalizationManager'/'LocalizationManager.exe').read_bytes(),b'MZ-localization-manager')
+            blocked=game/'ShooterGame'/'Content'/'reexport-work'; stderr=io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code=tool_reexport.main(['--tool',str(tool),'--overlay',str(overlay),'--work',str(blocked),
+                                         '--game',str(game)])
+            self.assertEqual(code,1); self.assertIn('outside the game tree',stderr.getvalue()); self.assertFalse(blocked.exists())
+    def test_reexport_stops_before_a_partial_work_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); overlay=make_overlay(root/'overlay',[('example.uasset',b'original',b'patched'),
+                                                               ('second.uasset',b'old',b'new')])
+            tool=root/'export_tool.py'
+            tool.write_text('#!/usr/bin/env python3\n',encoding='utf-8')
+            import tool_reexport
+            (overlay/'second.uasset').unlink(); (overlay/'second.uasset').mkdir()
+            work=root/'work'; stderr=io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code=tool_reexport.main(['--tool',str(tool),'--overlay',str(overlay),'--work',str(work)])
+            self.assertEqual(code,1); self.assertIn('Unreadable file',stderr.getvalue()); self.assertFalse(work.exists())
+            (overlay/'second.uasset').rmdir(); (overlay/'second.uasset').write_bytes(b'changed')
+            stderr=io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code=tool_reexport.main(['--tool',str(tool),'--overlay',str(overlay),'--work',str(work),'--game',str(root/'missing-game')])
+            self.assertEqual(code,1); self.assertIn('Bad game path',stderr.getvalue()); self.assertFalse(work.exists())
+            (overlay/'second.uasset').write_bytes(b'new')
+            real=ase_localize.write_bytes
+            def fail_second(path,data):
+                if Path(path).name=='second.uasset': raise OSError('disk full')
+                return real(path,data)
+            with unittest.mock.patch.object(tool_reexport,'write_bytes',fail_second):
+                stderr=io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    code=tool_reexport.main(['--tool',str(tool),'--overlay',str(overlay),'--work',str(work)])
+            self.assertEqual(code,1); self.assertIn('disk full',stderr.getvalue()); self.assertFalse(work.exists())
 
 if __name__=='__main__': unittest.main()

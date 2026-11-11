@@ -99,25 +99,34 @@ def expand_short_component(parent,component):
     try: names=[child.name for child in parent.iterdir()]
     except OSError: return component
     return match_short_name(names,component) or component
+def _drop_extended(path):
+    text=str(path)
+    if text.startswith('\\\\?\\UNC\\'): return Path('\\\\'+text[8:])
+    if text.startswith('\\\\?\\'): return Path(text[4:])
+    return path
 def canonical_path(path):
     """Absolute local path with short names expanded. Drive and UNC text stay lexical off Windows."""
     drive,absolute,unc,parts=logical_parts(path)
-    if (unc or drive) and os.name!='nt':
+    if os.name!='nt' and (unc or drive):
         prefix='//'+'/'.join(parts) if unc else drive+'/'+'/'.join(parts)
         return Path(prefix)
-    if drive and os.name=='nt': built=Path(drive+'\\')
+    if unc and os.name=='nt':
+        if len(parts)<2: return Path('\\\\'+'\\'.join(parts))
+        built=Path('\\\\%s\\%s\\'%(parts[0],parts[1])); parts=parts[2:]
+    elif drive and os.name=='nt': built=Path(drive+'\\')
     elif absolute: built=Path(os.sep)
     else: built=Path.cwd()
     for part in parts:
         built=built/expand_short_component(built,part)
-        # Resolve each existing prefix so a symlink parent still contains its children.
+        # Resolve each existing prefix so a symlink or 8.3 parent still contains its children.
         try:
-            if built.exists(): built=built.resolve()
+            if built.exists(): built=_drop_extended(built.resolve())
         except OSError: pass
     return built
 def path_key(path):
-    drive,absolute,unc,parts=logical_parts(path)
-    if drive or unc:
+    drive,_absolute,unc,parts=logical_parts(path)
+    # On Windows a drive path such as C:\\Users\\RUNNER~1 must be resolved before comparison.
+    if os.name!='nt' and (drive or unc):
         text=('//' if unc else drive+'/')+'/'.join(parts)
     else:
         text=str(canonical_path(path)).replace('\\','/')
@@ -255,6 +264,15 @@ def install_overlay(args):
             raise ValueError('Install failed and restore failed; backup kept at '+str(backup_path)+': '+str(restore_exc)) from exc
         raise ValueError('Install failed before completion; game files restored: '+str(exc)) from exc
     print(json.dumps({'copied_files':len(planned),'backup':str(backup_path),'game_tested':False}))
+def tool_command(tool):
+    """Start an external exporter. Windows does not honor a Python shebang."""
+    tool=canonical_path(tool)
+    if not tool.is_file(): raise ValueError('External exporter not found; it is not bundled')
+    head=read_file(tool)
+    first=head.splitlines()[0].lower() if head.startswith(b'#!') else b''
+    if tool.suffix.lower()=='.py' or b'python' in first:
+        return tool,[sys.executable,str(tool)]
+    return tool,[str(tool)]
 def discover(args):
     if not re.fullmatch(r'[0-9]+',args.id): raise ValueError('Mod ID must contain decimal digits')
     libraries=set(Path(p).expanduser().resolve() for p in args.library)
