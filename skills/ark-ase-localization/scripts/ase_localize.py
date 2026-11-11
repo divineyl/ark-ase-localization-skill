@@ -55,16 +55,19 @@ def discover(args):
 def unpack(args):
     source=Path(args.input).resolve(); files=sorted(source.rglob('*.z'))
     if not files: raise ValueError('No .z files under input')
-    out=new_directory(args.output,source); manifest=[]
+    decoded=[]
     for f in files:
         rel=f.relative_to(source).with_suffix('')
         if rel.suffix.lower() not in {'.uasset','.umap'}: raise ValueError('Unexpected compressed file: '+str(rel))
-        compressed=f.read_bytes(); raw=unpack_bytes(compressed)
+        compressed_bytes=f.read_bytes(); raw=unpack_bytes(compressed_bytes)
         sidecar=Path(str(f)+'.uncompressed_size')
         if sidecar.exists() and int(sidecar.read_text(encoding='ascii').strip())!=len(raw):
             raise ValueError('Sidecar length mismatch: '+str(rel))
+        decoded.append((rel,raw,compressed_bytes))
+    out=new_directory(args.output,source); manifest=[]
+    for rel,raw,compressed_bytes in decoded:
         target=safe_path(out,str(rel)); target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(raw)
-        manifest.append({'path':rel.as_posix(),'sha256':digest(raw),'compressed_sha256':digest(compressed),'bytes':len(raw)})
+        manifest.append({'path':rel.as_posix(),'sha256':digest(raw),'compressed_sha256':digest(compressed_bytes),'bytes':len(raw)})
     write_json(out/'source_manifest.json',{'files':manifest})
     print(json.dumps({'unpacked_files':len(manifest),'source_modified':False}))
 def extract(args):
@@ -101,7 +104,9 @@ def text_pairs(edit):
             elif edit['key']!='MOD_ClientSettings':
                 old=dict(leaves(before))
                 for path,value in leaves(after):
-                    if isinstance(value,str) and old[path]!=value: yield old[path],value
+                    if not isinstance(value,str) or old.get(path)==value: continue
+                    if path in old: yield old[path],value
+                    else: yield old.get(path[:-1]+('en',),old.get(path[:-1]+('EN',),'')),value
             return
     yield edit['source'],edit['translation']
 
