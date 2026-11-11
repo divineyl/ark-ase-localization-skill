@@ -31,3 +31,19 @@ Skill frontmatter 已通过创建器的 quick_validate 检查。开源目录完�
 同日后续游戏内反馈：安装并重启后，ZH 和 EN 均仍显示部分键名。模组专用字节码修复在副本上检查了 7 个资源、22 个等长字面量身份改动的可逆性和涉及函数的解析、脚本长度及跳转；随后安装并备份。用户提供的截图显示该图鉴页面的中英文标题、按钮与提示正常；对缺失的 `Canbetames:` 项另补 EN/ZH 后，用户确认中文“可驯服：”。`Region #` 和所有其他页面未逐项验证。
 
 包含这两次改动的新包有 62 个资源。安装器在隔离目录测试了原版与上一版汉化升级、备份、幂等、输出哈希和未知版本拒绝，ZIP 内容哈希与清单匹配。这些是一次性案例测试，通用 CLI 不支持 Kismet 字节码修改，历史的 60 文件独立重导出结论不能自动延伸至后续字节码改动。
+
+## 2026-11-11 覆盖补充
+
+在 Linux、Python 3.12.3 上执行 `python -m unittest discover -s tests -v`，**23 项通过**。新增检查使用合成样本，不包含游戏或模组原文。
+
+这次补上的行为：
+
+- 整段 `_KEY` / `_KEY_` 与 `$$范围$:$KEY` 查表 token，以及 `/Game/`、`/Script/`、`/Ark-Nucleus/` 路径，不能被替换。普通显示叶子和带 `EnumID` 的 `Name` 仍可翻译。
+- 公开导入器里的单个 JSON 界面属性沿用原有显示叶子规则。`Nucleus_ServerLocalization_Default` 与 `MyMod_LocalizationStrings` 只允许改 `zh`，并按该语言检查 `__数字__`。
+- `Languages` 与 `N_EditLangDrop_SupportedLanguages` 可以改 `zh` 或旧写法 `ZH` 的显示名，不能改 `en`、`zh-TW` 或其他语言。
+- `TooltipText` 作为 FText 可以翻译；`ButtonText` 只有普通字符串形式可以翻译。未知 FText history 进入 `opaque`。
+- `allow_language_default` 仍只放行客户端语言 EN/ZH。`MyMod_LocStrings` 这类映射属性不是显示字段。
+- 解压在写出前完成校验，失败不创建输出目录。发现命令读取 `libraryfolders.vdf`，不把 `LinuxNoEditor` 当作 Windows 资源。
+- 独立重导出脚本会区分匹配、缺失和失败；归档只在报告与 manifest 绑定且没有缺失时写成 `passed`。
+
+没有做游戏内测试，也没有改动已有案例译文。`MyMod_LocStrings`、权限标签、客户端/服务器设置映射、`Nucleus_Edit_Widgets`、Kismet、图片文字和没有统一外形的查表短句仍然不自动汉化。`zh-TW` 保持原值。

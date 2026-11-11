@@ -13,7 +13,7 @@ license: MIT
 1. **确认文件**：按用户提供的 ID 查 Steam 库下的 `Mods` 和 `workshop/content/346110`。只有缓存时使用 `WindowsNoEditor` 副本解压；Mods 中没有目录不等于没下载。缺文件时先查可用目录，再问缺失路径。见 [文件发现与完整流程](references/workflow.md)。
 2. **识别格式**：先读头和表结构。附带脚本仅支持实测的 `402/7`、`404/10` 两种布局；版本号相同也不能跳过结构检查。未知格式和 external bulk 保留原件并报告，不修改头来绕过拒绝。见 [资源布局](references/ase-format.md)。
 3. **提取与审稿**：区分显示字段、内部标识符和运行时内容。读不到 Buff 时检查 `BuffDescription`；UI 检查 FText、FText 数组和 JSON。保留原始命名空间、键、事件、绑定、权限和类路径。见 [UI 与 JSON](references/ui-and-json.md)。
-4. **翻译与写回**：按文件哈希及 `export_index + property_path + text_index` 定位；不要只凭原文或译文字典替换。按用户要求决定双语名称，紧凑按钮优先短中文。保留数值、占位符、富文本标签。具体模组术语不能当成跨模组通用规则。
+4. **翻译与写回**：按文件哈希及 `export_index + property_path + text_index` 定位；不要只凭原文或译文字典替换。按用户要求决定双语名称，紧凑按钮优先短中文。保留数值、占位符、富文本标签，以及整段查表 token。具体模组术语不能当成跨模组通用规则。
 5. **验证后交付**：重新解析、定点读回、按位置反向还原且逐字节一致，核对未修改导出块及名称表，再用独立工具只读重导出。明确哪些检查未完成。分别统计资源文件、修改字段、JSON 内文字和唯一译文；文件通过不等于游戏 UI 全部通过。见 [验证与发布](references/validation-and-release.md)。
 
 ## 脚本入口

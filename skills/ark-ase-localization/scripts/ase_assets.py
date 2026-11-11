@@ -3,18 +3,65 @@ import json
 import re
 import struct
 import zlib
-from ase_layout import Asset,DISPLAY_KEYS,fstring,encode_fstring
+from ase_layout import Asset,DISPLAY_KEYS,FTEXT_KEYS,fstring,encode_fstring
 
+# Older cooked Nucleus properties, plus single JSON strings written by the public blueprint importer.
+# MyMod_LocStrings, permission tags and client/server setting maps are maps, not one JSON string.
 JSON_FIELDS={'MOD_LocalizationString','MOD_InfoPage_UIConfig','MOD_ClientSettings',
  'Nucleus_StaticUIConfig','Nucleus_UIConfig','Nucleus_SpawnUIConfig','TestUIConfig',
  'UIConfig_Page','UIConfig_DinoCatalog','UIConfig_ItemsCatalog','UIConfig_DefaultModInfoPage',
  'UIConfig_Settings','UIConfig_Localization','UIConfig_Localization_NotSupported',
- 'UIConfig_Logs','UIConfig_Logs_NotSupported','UIConfig_Settings_NotSupported','Languages'}
+ 'UIConfig_Logs','UIConfig_Logs_NotSupported','UIConfig_Settings_NotSupported','Languages',
+ 'N_EditLangDrop_SupportedLanguages','N_Basic_MainUI','N_Basic_MainUI_JsonPlayground',
+ 'N_Basic_JsonPlayground_Default','N_Basic_MainUI_Encyclopedia','N_Basic_MainUI_InstalledMods',
+ 'N_Basic_MainUI_AllLogs','N_Basic_Mods_NoCustomInfoPage','MyMod_CustomInfoUI',
+ 'N_Basic_MainUI_Permissions','Nucleus_MainUI_ServerInfo','Nucleus_MainUI_AllLocalizations',
+ 'Nucleus_MainUI_AllSurvivors','Nucleus_DefaultServerInfoPage','Nucleus_DisabledServerInfoPage',
+ 'Nucleus_StructPainter_UIConfig','N_EditColor_ColorPickerUIConfig','Nucleus_Edit_Category_UI',
+ 'N_BaseWidget_StaticUIConfig','DU_Item_ModalUIConfig','N_BaseWidget_CONST_ErrorWidget',
+ 'N_BaseWidget_CONST_Modal','N_BaseWidget_CONST_NotifWidget','Nucleus_CONST_TabButtonUIConfig',
+ 'N_DropDown_DefaultItemWidget','Nucleus_ServerLocalization_Default','MyMod_LocalizationStrings'}
+LANG_TABLE_FIELDS={'Nucleus_ServerLocalization_Default','MyMod_LocalizationStrings'}
+LANGUAGE_NAME_FIELDS={'Languages','N_EditLangDrop_SupportedLanguages'}
 STR_FIELDS=DISPLAY_KEYS|JSON_FIELDS|{'CustomToolTipString','My_PlaceholderModDesc'}
+DISPLAY_JSON_LEAVES={'NLText','NLLabel','NLTitle','NLNote','Text','Label','Title','Note','HintText','Placeholder'}
+LANG_CODE=re.compile(r'[a-z]{2}(?:-[A-Z]{2})?')
+# Whole-value lookup tokens. Underscore keys are the cooked table form; $$Scope$:$KEY is the importer form.
+TOKEN_RE=re.compile(r'(?:_[A-Z0-9_]+|\$\$[^$\s]+\$:\$[A-Za-z0-9_-]+)\Z')
 
 def check_placeholders(original,translated):
     if re.findall(r'__\d+__',original)!=re.findall(r'__\d+__',translated):
         raise ValueError('Positional placeholders changed')
+
+def protected_literal(value):
+    return isinstance(value,str) and bool(TOKEN_RE.fullmatch(value) or value.startswith(('/Game/','/Script/','/Ark-Nucleus/')))
+
+def reject_protected(before,after):
+    if before!=after and (protected_literal(before) or protected_literal(after)):
+        raise ValueError('Preserve resource paths and localization tokens')
+
+def is_lang_entry(node):
+    if not isinstance(node,dict) or 'en' not in node: return False
+    return all(isinstance(key,str) and isinstance(text,str) and LANG_CODE.fullmatch(key) for key,text in node.items())
+
+def validate_lang_table(before,after):
+    """Allow only zh to be added, removed or edited. Keep en and every other language."""
+    def walk(a,b):
+        if is_lang_entry(a) or is_lang_entry(b):
+            if not is_lang_entry(a) or not is_lang_entry(b):
+                raise ValueError('Localization entry shape changed')
+            if (set(a)-set(b))-{'zh'} or (set(b)-set(a))-{'zh'}:
+                raise ValueError('Only the zh language may be added or removed')
+            for key in set(a)&set(b):
+                if key!='zh' and a[key]!=b[key]: raise ValueError('Original language text changed')
+            if 'zh' in b:
+                if not isinstance(a.get('en'),str): raise ValueError('Missing English reference text')
+                check_placeholders(a['en'],b['zh'])
+            return
+        if not isinstance(a,dict) or not isinstance(b,dict) or set(a)!=set(b):
+            raise ValueError('Localization table shape changed')
+        for key in a: walk(a[key],b[key])
+    walk(before,after)
 
 def text_at(payload,offset=0):
     if offset+9>len(payload) or payload[offset+4]!=0:
@@ -55,7 +102,7 @@ class Package(Asset):
                         ns,key,value,start,end=text_at(node['payload'])
                         if end!=len(node['payload']): raise ValueError('Trailing FText data')
                         rows.append({**common,'kind':kind,'source':value,'namespace':ns,
-                                     'text_key':key,'display_candidate':node['key'] in {'Text','HintText','ToolTipText'}})
+                                     'text_key':key,'display_candidate':node['key'] in FTEXT_KEYS})
                     except ValueError as exc:
                         opaque.append({**common,'reason':str(exc)})
                 elif kind=='ArrayProperty' and node['key']=='DisplayNames':
@@ -82,6 +129,9 @@ def validate_json_change(key,old,new,allow_language_default=False):
     """Reject code/binding/permission changes hidden inside display JSON."""
     try: before,after=json.loads(old),json.loads(new)
     except (ValueError,TypeError) as exc: raise ValueError('Invalid JSON') from exc
+    if key in LANG_TABLE_FIELDS:
+        validate_lang_table(before,after)
+        return
     if key=='MOD_LocalizationString':
         if not isinstance(before,dict) or not isinstance(after,dict) or set(before)!=set(after):
             raise ValueError('Localization table shape changed')
@@ -109,18 +159,18 @@ def validate_json_change(key,old,new,allow_language_default=False):
             if len(a)!=len(b): raise ValueError('JSON array length changed')
             for i,(aa,bb) in enumerate(zip(a,b)): compare(aa,bb,path+(i,),a)
         elif a!=b:
-            if isinstance(a,str) and isinstance(b,str): check_placeholders(a,b)
+            if isinstance(a,str) and isinstance(b,str):
+                check_placeholders(a,b); reject_protected(a,b)
             if key=='MOD_ClientSettings':
                 if not (allow_language_default and path==('CoreClientSettings','Language') and
                         isinstance(a,str) and isinstance(b,str) and a in {'EN','ZH'} and b in {'EN','ZH'}):
                     raise ValueError('Default language change requires explicit plan flag')
-            elif key=='Languages':
-                if path not in {('ZH','Name'),('ZH','NativeName')}: raise ValueError('Only Chinese display names may change')
-            elif not (isinstance(a,str) and path[-1] in {'NLText','NLLabel','NLTitle','NLNote','Text','Label','Title','Note','HintText','Placeholder'}):
+            elif key in LANGUAGE_NAME_FIELDS:
+                if path not in {('zh','Name'),('zh','NativeName'),('ZH','Name'),('ZH','NativeName')}:
+                    raise ValueError('Only simplified Chinese display names may change')
+            elif not (isinstance(a,str) and path[-1] in DISPLAY_JSON_LEAVES):
                 if not (isinstance(a,str) and path[-1]=='Name' and isinstance(parent,dict) and 'EnumID' in parent):
                     raise ValueError('Non-display JSON value changed: '+str(path))
-            if isinstance(a,str) and (a.startswith('/Game/') or re.fullmatch(r'_[A-Z0-9_]+',a)):
-                raise ValueError('Preserve resource paths and localization tokens')
     compare(before,after)
 
 def patch(data,edits,allow_language_default=False):
@@ -139,7 +189,8 @@ def patch(data,edits,allow_language_default=False):
         if not isinstance(new,str) or '\0' in new: raise ValueError('Translation must be a NUL-free string')
         if row['kind']=='StrProperty' and row['key'] in JSON_FIELDS:
             validate_json_change(row['key'],row['source'],new,allow_language_default)
-        else: check_placeholders(row['source'],new)
+        else:
+            check_placeholders(row['source'],new); reject_protected(row['source'],new)
         targets[loc]=new; applied.append({**row,'translation':new})
     def rewrite(nodes,tail,export,path=()):
         out=[]

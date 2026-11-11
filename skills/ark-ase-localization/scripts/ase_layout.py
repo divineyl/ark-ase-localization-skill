@@ -12,6 +12,8 @@ DISPLAY_KEYS=frozenset({'ModifierName','ModifierDescription','HUDMessage',
     'ModName','ModDescription','InventoryNameOverride','RemoteInventoryDescriptionString',
     'ActivateContainerString','DeactivateContainerString','OpenSceneActionName',
     'DisabledOpenSceneActionName','Text','ButtonText','ToolTipText','TooltipText'})
+# UMG stores these as FText. ButtonText is a mod string property, not an FText key.
+FTEXT_KEYS=frozenset({'Text','HintText','ToolTipText','TooltipText'})
 
 def fstring(data, offset, end):
     if offset+4>end: raise ValueError('Truncated FString length')

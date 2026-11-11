@@ -8,19 +8,28 @@ def fs(s):
     except UnicodeEncodeError:
         raw=s.encode('utf-16-le')+b'\0\0'; return struct.pack('<i',-len(raw)//2)+raw
 
-def asset(version=402):
+def asset(version=402, strings=(), texts=()):
     licensee,no,bulk=(7,163,147) if version==402 else (10,171,155)
     names=['None','StrProperty','StructProperty','TextProperty','ArrayProperty',
       'BuffDescription','StatusValueModifierDescription','ModifierName','ModifierDescription',
       'Text','DisplayNames','Default__Example_C','Widget_A','Widget_B','Enum_A',
       'Nucleus_StaticUIConfig','DinoNameTag']
+    for name,_value in strings:
+        if name not in names: names.append(name)
+    for item in texts:
+        if item[0] not in names: names.append(item[0])
     def fn(s): return struct.pack('<ii',names.index(s),0)
     def tag(name,kind,payload,extra=b''):
         return fn(name)+fn(kind)+struct.pack('<ii',len(payload),0)+extra+payload
     def text(s): return struct.pack('<IB',0,0)+fs('synthetic-namespace')+fs('stable-key')+fs(s)
     buff=tag('ModifierName','StrProperty',fs('Cold Aura'))+tag('ModifierDescription','StrProperty',fs('Cooling you down.'))+fn('None')
     config='{"NLLabel":"Spawn","EventUID":"Nucleus/Spawn","BindValue":"Health","Min":0}'
-    chunks=[tag('BuffDescription','StructProperty',buff,fn('StatusValueModifierDescription'))+
+    prefix=b''.join(tag(name,'StrProperty',fs(value)) for name,value in strings)
+    for item in texts:
+        history=0 if len(item)<3 else item[2]
+        payload=struct.pack('<IB',0,history)+fs('synthetic-namespace')+fs('stable-key')+fs(item[1])
+        prefix+=tag(item[0],'TextProperty',payload)
+    chunks=[prefix+tag('BuffDescription','StructProperty',buff,fn('StatusValueModifierDescription'))+
             tag('DinoNameTag','StrProperty',fs('ExampleInternalTag'))+
             tag('Nucleus_StaticUIConfig','StrProperty',fs(config))+fn('None')+b'opaque-tail',
             tag('Text','TextProperty',text('Label:'))+fn('None'),

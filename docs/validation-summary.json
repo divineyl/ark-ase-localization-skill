@@ -24,5 +24,20 @@
   "game_tested": false,
   "game_installed": false,
   "github_ci_executed": false,
-  "game_or_mod_assets_included": false
+  "game_or_mod_assets_included": false,
+  "coverage_followup_2026_11_11": {
+    "platform_actually_tested": "Linux, Python 3.12.3",
+    "unit_and_cli_tests_passed": 23,
+    "game_tested": false,
+    "existing_case_translations_changed": false,
+    "added_behavior": [
+      "preserve underscore and $$ scope lookup tokens",
+      "preserve /Game/, /Script/ and /Ark-Nucleus/ paths",
+      "edit only zh in importer language tables",
+      "edit zh or ZH display names in language lists",
+      "treat importer single-string UI JSON with the existing display-leaf rules",
+      "reject map-valued localization properties",
+      "record independent reexport passed only when the bound report is complete"
+    ]
+  }
 }
