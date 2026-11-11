@@ -120,7 +120,8 @@ class PreflightTests(unittest.TestCase):
             before=exe.read_bytes(); out=root/'out'
             real_open=open
             def locked(path,*args,**kwargs):
-                if Path(path)==exe: raise PermissionError('denied')
+                # Resolved paths can differ by 8.3 name or case, so match the file name.
+                if Path(path).name.lower()=='localizationmanager.exe': raise PermissionError('denied')
                 return real_open(path,*args,**kwargs)
             with unittest.mock.patch('builtins.open',locked):
                 with self.assertRaises(ValueError) as caught:
