@@ -72,3 +72,32 @@ work/
 ## 6. 用户说“全部汉化”
 
 先列可读的显示字段和未覆盖类型，尽可能处理已验证路线中的文本。对脚本无法处理的内容给出具体路径、类型和原因，而不是降低验证要求。可以交付明确标注范围的补丁；不能把尚未覆盖的代码常量或图片文字算作已完成。
+
+## 命令拒绝时
+
+`ase_localize.py` 遇到下列情况以退出码 1 结束，标准错误为 `ERROR:` 加原因。原件不会被改写。`unpack` 和 `patch` 在确认全部检查通过之前不会创建输出目录。
+
+| 原因里的句子 | 接下来怎么做 |
+| --- | --- |
+| `Mod ID must contain decimal digits` / `Invalid mod ID` | 模组 ID 只保留十进制数字 |
+| `Output already exists` / `Refusing to overwrite` / `Archive already exists` | 换一个还不存在的输出路径 |
+| `Output must be outside source tree` | 把输出放到输入目录外面 |
+| `Unsafe relative path` / `Path escapes root` | 计划里的 `path` 改回提取时的相对路径，不能是绝对路径，也不能含 `..` |
+| `No .z files under input` | 确认输入是含 `.uasset.z` 或 `.umap.z` 的缓存目录 |
+| `Unexpected compressed file` | 这条 `.z` 去掉后缀后不是 `.uasset` 或 `.umap`；保留原件并单独报告 |
+| `Sidecar length mismatch` | `.uncompressed_size` 与解压结果不一致；停止使用这份缓存 |
+| `No .uasset files under input` | 目录里可能只有 `.umap` 或其他文件。`.umap` 可以解压，当前提取和写回不处理它 |
+| `Unsupported plan schema` | 计划顶层 `schema` 保持数字 `1` |
+| `allow_language_default must be boolean` | 该字段只能是 JSON 布尔值 `true` 或 `false` |
+| `Duplicate/non-asset path` | 同一计划里的资源路径不能重复，并且必须以 `.uasset` 结尾 |
+| `Original SHA-256 mismatch` | 原件已经变了；重新 `extract`，再把审过的译文填回新计划 |
+| `No changed translations in plan` | 还没有与 `source` 不同的 `translation` |
+| `Not an approved display field` | 删掉这条 `translation`。`display_candidate` 为 false 的记录只供审查 |
+| `Source/locator mismatch` | `export_index`、`property_path`、`text_index`、`key`、`kind`、`source` 必须与这次提取一致 |
+| `Duplicate edit locator` | 同一个位置只能有一条改动 |
+| `Positional placeholders changed` | 按原文恢复 `__0__` 这种占位符的个数和顺序 |
+| `Inverse is not byte-identical` / `Inverse mismatch` | 停止发布该文件，保留原件 |
+| `Independent report belongs to a different overlay manifest` | 报告不是这一份 overlay；对当前覆盖目录重新运行 `tool_reexport.py` |
+| `Independent report is incomplete or has failures` | 补齐缺失项，或去掉 `--reexport-report`，让归档把独立导出记为 `not_run` |
+
+压缩头、包版本和 JSON 结构错误也会以 `ERROR:` 退出。遇到未知包版本时保留原件；不要改版本号后再试。

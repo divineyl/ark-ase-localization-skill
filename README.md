@@ -14,6 +14,23 @@
 
 仓库不包含游戏、模组资产、第三方工具二进制、私人聊天、个人路径或账号凭据。
 
+## 目录与职责
+
+```text
+skills/ark-ase-localization/
+  SKILL.md                 代理读的操作说明
+  agents/openai.yaml       Codex 展示名、短说明和默认提示
+  references/              按任务打开的教程
+  scripts/ase_layout.py    只读包头、名称表、属性树；显示字段白名单 DISPLAY_KEYS
+  scripts/ase_assets.py    文字记录、JSON 校验、按位置写回、.z 解压
+  scripts/ase_localize.py  discover / unpack / extract / patch / verify / package
+  scripts/tool_reexport.py 可选的外部工具只读导出
+tests/                     合成样本。fixtures.py 造包，测试不变量
+docs/VALIDATION.md         已发生过的验证记录，不是对未来资源的兼容承诺
+```
+
+依赖方向是 `ase_layout.py` → `ase_assets.py` → `ase_localize.py` → `tool_reexport.py`。脚本按文件路径运行，不需要 pip 安装。改白名单、包布局或命令参数时，同时改对应的 `references/` 页面和本说明。
+
 ## 使用 Skill
 
 将 `skills/ark-ase-localization` 整个目录复制到代理支持的 Skill 目录。以当前 Codex 为例，可使用用户级 `~/.agents/skills/ark-ase-localization`，或在目标工程内放置 `.agents/skills/ark-ase-localization`。目录中必须保留 `SKILL.md`、`scripts`、`references`。参见 [OpenAI 官方本地 Skill 文档](https://learn.chatgpt.com/docs/build-skills)。
@@ -58,6 +75,29 @@ python scripts/tool_reexport.py --tool "/path/to/UE4localizationsTool.exe" --ove
 它只在新副本上执行导出，不执行 import。缺失、失败或未读出项会明确列出并以非零状态退出。仓库不会下载工具或安装补丁到游戏目录。
 
 独立导出通过后，可在 `package` 命令增加 `--reexport-report "./work/tool-check/reexport_report.json"`。工具会核对报告绑定的 manifest 和匹配数量；没有提供报告时，包内 `verification.json` 明确写为 `not_run`，不会暗示已通过独立导出。
+
+## 命令约定
+
+在 `skills/ark-ase-localization` 目录执行。下面的 `python` 指 Python 3.10 及以上；当前环境只有 `python3` 时，把命令里的 `python` 换成 `python3`。成功时结果打印到标准输出，编码会尽量设为 UTF-8。失败时退出码为 1，标准错误以 `ERROR:` 开头。
+
+| 命令 | 参数 | 成功时能看到 | 需要换做法的情况 |
+| --- | --- | --- | --- |
+| `discover` | `--id` 必填；`--library` 可重复 | `mod_id`、`candidates`、`searched_libraries` | ID 含非数字会退出 1。一个候选都没有时仍退出 0，`candidates` 为 `[]` |
+| `unpack` | `--input`、`--output` | `unpacked_files`、`source_modified: false`，以及输出目录里的 `source_manifest.json` | 没有 `.z`、压缩校验失败、输出已存在，或输出位于输入目录里面 |
+| `extract` | `--input`、`--output` | `parsed_files`、`typed_strings`、`display_candidates`、`unsupported_files` | 输入下没有 `.uasset`，或计划文件已经存在 |
+| `patch` | `--input`、`--plan`、`--output` | 覆盖目录和其中的 `manifest.json` | 哈希不一致、路径越界、没有实际改动的译文、反向还原不是逐字节一致 |
+| `verify` | `--source`、`--overlay` | `verified_files`、`inverse_byte_verified: true`、`game_tested: false` | 覆盖目录里的资源和清单不一致，或哈希、反向还原失败 |
+| `package` | `--source`、`--overlay`、`--id`、`--output`；可选 `--reexport-report` | `zip_verified`、压缩包 `sha256`、`files` | 报告和当前 manifest 不匹配，或目标 zip 已存在 |
+
+`discover` 不传 `--library` 时，只在 Windows 上尝试读取当前用户的 Steam 注册表。传了库路径后不再读注册表，但会读取该库的 `steamapps/libraryfolders.vdf` 里带引号的 `path`，把其中成对反斜杠收成一条，再继续查找。它不扫描整盘，也不订阅、下载或启动游戏。
+
+`candidates.kind` 只有两种：`installed`（`steamapps/common/ARK/ShooterGame/Content/Mods/<ID>`）和 `workshop-windows`（`steamapps/workshop/content/346110/<ID>/WindowsNoEditor`）。`LinuxNoEditor` 不会进入候选。
+
+`unpack` 只接受 `.uasset.z` 和 `.umap.z`。旁边若有同名 `.uncompressed_size`，其中的数字必须等于解压后的字节数。`extract` 和 `patch` 只处理 `.uasset`；解压出来的 `.umap` 留在原件目录和 `source_manifest.json` 里，不会进入 `plan.json`。
+
+`unpack` 与 `patch` 的输出必须是还不存在的目录，并且不能放在输入目录里面。`extract` 和 `package` 只拒绝覆盖已有文件，请仍把 `plan.json` 和 zip 放在原件目录外面。
+
+常见 `ERROR:` 句子和接下来该做什么，写在 [流程说明的命令拒绝一节](skills/ark-ase-localization/references/workflow.md#命令拒绝时)。
 
 ## 教程索引
 
