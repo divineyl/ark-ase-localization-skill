@@ -1,5 +1,5 @@
-"""Path normalization. Samples are synthetic directories, not game files."""
-import os,sys,tempfile,unittest
+"""Path normalization and preflight. Samples are synthetic directories, not game files."""
+import argparse,hashlib,json,os,subprocess,sys,tempfile,unittest,unittest.mock
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'skills'/'ark-ase-localization'/'scripts'))
 import ase_localize
@@ -57,5 +57,167 @@ class PathNormalizationTests(unittest.TestCase):
             (root/'runneradmin').mkdir(); (root/'runnerbeta').mkdir()
             self.assertFalse(ase_localize.same_path(root/'RUNNER~1',root/'runneradmin'))
             self.assertFalse(ase_localize.canonical_path(root/'RUNNER~1').exists())
+
+SCRIPT=Path(__file__).resolve().parents[1]/'skills'/'ark-ase-localization'/'scripts'/'ase_localize.py'
+
+def make_game(root):
+    root=Path(root)
+    exe=root/'Tools'/'LocalizationManager'/'LocalizationManager.exe'
+    archive=root/'ShooterGame'/'Content'/'Localization'/'Game'/'en'/'ShooterGame.archive'
+    exe.parent.mkdir(parents=True); archive.parent.mkdir(parents=True)
+    (root/'ShooterGame'/'Content'/'Mods').mkdir(parents=True)
+    exe.write_bytes(b'MZ-localization-manager'); archive.write_bytes(b'archive-bytes')
+    return root
+
+def make_overlay(path,files):
+    path=Path(path); path.mkdir(parents=True)
+    manifest={'schema':1,'files':[]}
+    for rel,source,output in files:
+        target=path/rel; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(output)
+        manifest['files'].append({'path':rel,'source_sha256':hashlib.sha256(source).hexdigest(),
+                                   'output_sha256':hashlib.sha256(output).hexdigest(),'edits':[]})
+    (path/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
+    return path
+
+class PreflightTests(unittest.TestCase):
+    def run_cli(self,*args,ok=True):
+        result=subprocess.run([sys.executable,str(SCRIPT),*map(str,args)],capture_output=True,text=True,encoding='utf-8')
+        self.assertEqual(result.returncode==0,ok,result.stderr or result.stdout)
+        return result
+    def test_export_rejects_bad_paths_without_writing(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'ARK'); out=root/'out'
+            missing=root/'only-shooter'; (missing/'ShooterGame').mkdir(parents=True); nowhere=root/'nowhere'
+            self.run_cli('export','--game',nowhere,'--output',out,ok=False)
+            self.assertFalse(out.exists())
+            result=self.run_cli('export','--game',missing,'--output',out,ok=False)
+            self.assertIn('Missing LocalizationManager inputs',result.stderr)
+            self.assertIn('LocalizationManager.exe',result.stderr)
+            self.assertFalse(out.exists())
+            archive=game/'ShooterGame'/'Content'/'Localization'/'Game'/'en'/'ShooterGame.archive'
+            archive.unlink()
+            result=self.run_cli('export','--game',game,'--output',out,ok=False)
+            self.assertIn('ShooterGame.archive',result.stderr)
+            self.assertFalse(out.exists())
+            archive.write_bytes(b'archive-bytes')
+            linux=game/'LinuxNoEditor'; linux.mkdir()
+            result=self.run_cli('export','--game',linux,'--output',out,ok=False)
+            self.assertIn('Bad game path',result.stderr)
+            self.assertIn('Linux',result.stderr)
+            self.assertFalse(out.exists())
+            game_file=root/'not-a-dir'; game_file.write_text('x',encoding='utf-8')
+            result=self.run_cli('export','--game',game_file,'--output',out,ok=False)
+            self.assertIn('not a directory',result.stderr)
+            inside=game/'ShooterGame'/'dump'
+            self.run_cli('export','--game',game,'--output',inside,ok=False)
+            self.assertFalse(inside.exists())
+            marker=root/'existing'; marker.mkdir(); (marker/'keep.txt').write_text('keep',encoding='utf-8')
+            self.run_cli('export','--game',game,'--output',marker,ok=False)
+            self.assertEqual((marker/'keep.txt').read_text(encoding='utf-8'),'keep')
+    def test_export_unreadable_input_and_partial_write(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'ARK'); exe=game/'Tools'/'LocalizationManager'/'LocalizationManager.exe'
+            before=exe.read_bytes(); out=root/'out'
+            real_open=open
+            def locked(path,*args,**kwargs):
+                if Path(path)==exe: raise PermissionError('denied')
+                return real_open(path,*args,**kwargs)
+            with unittest.mock.patch('builtins.open',locked):
+                with self.assertRaises(ValueError) as caught:
+                    ase_localize.export_inputs(argparse.Namespace(game=str(game),output=str(out)))
+            self.assertIn('Unreadable file',str(caught.exception))
+            self.assertFalse(out.exists()); self.assertEqual(exe.read_bytes(),before)
+            real_write=ase_localize.write_bytes
+            def fail_archive(path,data):
+                if Path(path).name=='ShooterGame.archive': raise OSError('disk full')
+                return real_write(path,data)
+            with unittest.mock.patch.object(ase_localize,'write_bytes',fail_archive):
+                with self.assertRaises(ValueError) as partial:
+                    ase_localize.export_inputs(argparse.Namespace(game=str(game),output=str(out)))
+            self.assertIn('no partial output kept',str(partial.exception))
+            self.assertFalse(out.exists()); self.assertEqual(exe.read_bytes(),before)
+    def test_export_accepts_short_and_backslash_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'runneradmin'/'ARK'); out=root/'exported'
+            outside=root/'outside'; outside.mkdir(); secret=outside/'secret.txt'; secret.write_bytes(b'secret')
+            archive=game/'ShooterGame'/'Content'/'Localization'/'Game'/'en'/'ShooterGame.archive'
+            archive.unlink(); archive.symlink_to(secret)
+            result=self.run_cli('export','--game',root/'RUNNER~1'/'ARK','--output',out,ok=False)
+            self.assertIn('escapes',result.stderr); self.assertFalse(out.exists()); self.assertEqual(secret.read_bytes(),b'secret')
+            archive.unlink(); archive.write_bytes(b'archive-bytes')
+            windows=str(root/'RUNNER~1'/'ARK').replace('/','\\')
+            result=self.run_cli('export','--game',windows,'--output',out)
+            report=json.loads(result.stdout)
+            self.assertEqual(report['copied_files'],2); self.assertFalse(report['game_tested'])
+            manifest=json.loads((out/'export_manifest.json').read_text(encoding='utf-8'))
+            self.assertFalse(manifest['game_tested']); self.assertFalse(manifest['installed'])
+            self.assertIn('Not an in-game test',manifest['note'])
+            self.assertTrue(ase_localize.same_path(manifest['game'],game))
+            self.assertTrue(ase_localize.same_path(manifest['ark_root'],game))
+            copied=out/'ShooterGame'/'Content'/'Localization'/'Game'/'en'/'ShooterGame.archive'
+            self.assertEqual(copied.read_bytes(),archive.read_bytes())
+            self.assertEqual(archive.read_bytes(),b'archive-bytes')
+    def test_install_refuses_bad_inputs_without_a_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'ARK'); overlay=make_overlay(root/'overlay',[('example.uasset',b'original',b'patched')])
+            backup=root/'backup'; mods=game/'ShooterGame'/'Content'/'Mods'/'42'
+            (mods).mkdir(); (mods/'example.uasset').write_bytes(b'other-mod'); (mods/'keep.mod').write_bytes(b'mod-meta')
+            result=self.run_cli('install','--game',root/'missing','--overlay',overlay,'--id','42','--backup',backup,ok=False)
+            self.assertIn('Bad game path',result.stderr); self.assertFalse(backup.exists())
+            self.assertEqual((mods/'example.uasset').read_bytes(),b'other-mod')
+            result=self.run_cli('install','--game',game,'--overlay',overlay,'--id','42','--backup',backup,ok=False)
+            self.assertIn('unknown installed version',result.stderr)
+            self.assertFalse(backup.exists()); self.assertEqual((mods/'example.uasset').read_bytes(),b'other-mod')
+            self.assertEqual((mods/'keep.mod').read_bytes(),b'mod-meta')
+            (mods/'example.uasset').unlink(); (mods/'example.uasset').symlink_to(root/'outside.txt')
+            (root/'outside.txt').write_bytes(b'outside')
+            result=self.run_cli('install','--game',game,'--overlay',overlay,'--id','42','--backup',backup,ok=False)
+            self.assertIn('escapes',result.stderr); self.assertFalse(backup.exists())
+            self.assertEqual((root/'outside.txt').read_bytes(),b'outside')
+            manifest=json.loads((overlay/'manifest.json').read_text(encoding='utf-8'))
+            manifest['files'][0]['path']='../example.uasset'
+            (overlay/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
+            self.run_cli('install','--game',game,'--overlay',overlay,'--id','42','--backup',backup,ok=False)
+            self.assertFalse(backup.exists())
+    def test_install_rolls_back_a_partial_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'ARK')
+            overlay=make_overlay(root/'overlay',[('example.uasset',b'original',b'patched'),('second.uasset',b'old',b'new')])
+            mods=game/'ShooterGame'/'Content'/'Mods'/'42'; mods.mkdir()
+            (mods/'example.uasset').write_bytes(b'original'); (mods/'second.uasset').write_bytes(b'old')
+            (mods/'keep.mod').write_bytes(b'mod-meta')
+            backup=root/'backup'; real=ase_localize.write_bytes; state={'tripped':False}
+            def fail_second(path,data):
+                if Path(path).name=='second.uasset' and 'Mods' in Path(path).parts and not state['tripped']:
+                    state['tripped']=True; raise OSError('disk full')
+                return real(path,data)
+            with unittest.mock.patch.object(ase_localize,'write_bytes',fail_second):
+                with self.assertRaises(ValueError) as caught:
+                    ase_localize.install_overlay(argparse.Namespace(game=str(game),overlay=str(overlay),id='42',backup=str(backup)))
+            self.assertIn('game files restored',str(caught.exception))
+            self.assertFalse(backup.exists())
+            self.assertEqual((mods/'example.uasset').read_bytes(),b'original')
+            self.assertEqual((mods/'second.uasset').read_bytes(),b'old')
+            self.assertEqual((mods/'keep.mod').read_bytes(),b'mod-meta')
+    def test_install_copies_only_after_preflight(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); game=make_game(root/'runneradmin'/'ARK')
+            overlay=make_overlay(root/'overlay',[('example.uasset',b'original',b'patched')])
+            mods=game/'ShooterGame'/'Content'/'Mods'/'42'
+            (mods).mkdir(); (mods/'example.uasset').write_bytes(b'original'); (mods/'keep.mod').write_bytes(b'mod-meta')
+            (mods/'other.uasset').write_bytes(b'leave-me')
+            backup=root/'backup'
+            result=self.run_cli('install','--game',str(game).replace('/','\\'),'--overlay',root/'overlay','--id','42','--backup',backup)
+            report=json.loads(result.stdout)
+            self.assertEqual(report['copied_files'],1); self.assertFalse(report['game_tested'])
+            self.assertEqual((mods/'example.uasset').read_bytes(),b'patched')
+            self.assertEqual((mods/'keep.mod').read_bytes(),b'mod-meta')
+            self.assertEqual((mods/'other.uasset').read_bytes(),b'leave-me')
+            self.assertFalse((mods/'manifest.json').exists())
+            self.assertEqual((backup/'example.uasset').read_bytes(),b'original')
+            saved=json.loads((backup/'backup_manifest.json').read_text(encoding='utf-8'))
+            self.assertFalse(saved['game_tested']); self.assertIn('Not an in-game test',saved['note'])
+            self.run_cli('install','--game',game,'--overlay',overlay,'--id','42','--backup',root/'backup-again')
+            self.assertEqual((mods/'example.uasset').read_bytes(),b'patched')
 
 if __name__=='__main__': unittest.main()

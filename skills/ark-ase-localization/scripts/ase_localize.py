@@ -141,6 +141,120 @@ def new_directory(path,source=None):
     if source and is_inside(source,p): raise ValueError('Output must be outside source tree')
     p.mkdir(parents=True)
     return p
+def preflight_game(game):
+    """Read the game tree before any export or install write. Fail closed on a bad path."""
+    origin=canonical_path(game)
+    if not origin.exists(): raise ValueError('Bad game path: does not exist: '+str(origin))
+    if not origin.is_dir(): raise ValueError('Bad game path: not a directory: '+str(origin))
+    if any(part.lower()=='linuxnoeditor' for part in origin.parts):
+        raise ValueError('Bad game path: Linux cook is not a Windows game target: '+str(origin))
+    try: next(origin.iterdir(), None)
+    except OSError as exc:
+        raise ValueError('Bad game path: unreadable directory: '+str(origin)) from exc
+    root=None; cursor=origin; seen=set()
+    while cursor not in seen:
+        seen.add(cursor)
+        shooter=cursor/'ShooterGame'
+        if shooter.is_dir():
+            if not is_inside(cursor,shooter):
+                raise ValueError('Bad game path: resolved path escapes the game tree: '+str(canonical_path(shooter)))
+            root=canonical_path(cursor); break
+        if cursor==cursor.parent: break
+        cursor=cursor.parent
+    if root is None: raise ValueError('Bad game path: ShooterGame directory not found under '+str(origin))
+    if not is_inside(root,origin):
+        raise ValueError('Bad game path: resolved path escapes the game tree: '+str(origin))
+    missing=[]; blobs=[]
+    for rel in LOCALIZATION_INPUTS:
+        path=canonical_path(root.joinpath(*rel.split('/')))
+        if not is_inside(root,path):
+            raise ValueError('Bad game path: resolved path escapes the game tree: '+str(path))
+        if not path.is_file():
+            missing.append(rel); continue
+        blobs.append((rel,path,read_file(path)))
+    if missing: raise ValueError('Missing LocalizationManager inputs: '+', '.join(missing))
+    return root,blobs
+def _discard_output(path):
+    if path.exists(): shutil.rmtree(path,ignore_errors=True)
+def export_inputs(args):
+    root,blobs=preflight_game(args.game)
+    output=canonical_path(args.output)
+    if is_inside(root,output): raise ValueError('Output must be outside the game tree')
+    out=new_directory(output)
+    try:
+        files=[]
+        for rel,_path,data in blobs:
+            write_bytes(safe_path(out,rel),data)
+            files.append({'path':rel,'sha256':digest(data)})
+        write_json(out/'export_manifest.json',{
+            'schema':1,'ark_root':str(root),'game':str(canonical_path(args.game)),'files':files,
+            'game_tested':False,'installed':False,
+            'note':'Offline copy of LocalizationManager inputs. Not an in-game test.'})
+    except Exception as exc:
+        _discard_output(out)
+        raise ValueError('Export failed before completion; no partial output kept: '+str(exc)) from exc
+    print(json.dumps({'copied_files':len(blobs),'game_tested':False}))
+def _restore_install(written,mods,mods_existed,backup_path):
+    for dest,previous in reversed(written):
+        if previous is None:
+            if dest.is_file() or dest.is_symlink(): dest.unlink()
+        else: write_bytes(dest,previous)
+    if not mods_existed and mods.exists(): shutil.rmtree(mods)
+    if backup_path.exists(): shutil.rmtree(backup_path)
+def install_overlay(args):
+    root,_blobs=preflight_game(args.game)
+    if not re.fullmatch(r'[0-9]+',args.id): raise ValueError('Invalid mod ID')
+    overlay=canonical_path(args.overlay)
+    manifest=read_json(overlay/'manifest.json')
+    if manifest.get('schema')!=1: raise ValueError('Unsupported plan schema')
+    if not manifest.get('files'): raise ValueError('No files to install')
+    mods=canonical_path(root/'ShooterGame'/'Content'/'Mods'/args.id)
+    if not is_inside(root,mods):
+        raise ValueError('Bad game path: mod directory escapes the game tree: '+str(mods))
+    backup_path=canonical_path(args.backup)
+    if backup_path.exists(): raise ValueError('Output already exists: '+str(backup_path))
+    if is_inside(root,backup_path) or is_inside(overlay,backup_path):
+        raise ValueError('Backup must be outside the game and the overlay')
+    planned=[]
+    for entry in manifest['files']:
+        rel=entry['path']
+        data=read_file(safe_path(overlay,rel))
+        if digest(data)!=entry['output_sha256']: raise ValueError('Hash mismatch: '+rel)
+        dest=safe_path(mods,rel)
+        if dest.exists():
+            if not dest.is_file(): raise ValueError('Unreadable file: '+str(dest))
+            current=read_file(dest)
+            if digest(current) not in {entry['source_sha256'],entry['output_sha256']}:
+                raise ValueError('Refusing unknown installed version: '+rel)
+            previous=current
+        else: previous=None
+        planned.append((rel,data,dest,previous))
+    mods_existed=mods.exists()
+    try: backup_path.mkdir(parents=True)
+    except OSError as exc:
+        raise ValueError('Install failed before completion; game files were not changed: '+str(exc)) from exc
+    try:
+        backed=[]
+        for rel,_data,_dest,previous in planned:
+            if previous is not None: write_bytes(safe_path(backup_path,rel),previous)
+            backed.append({'path':rel.replace('\\','/'),'action':'replaced' if previous is not None else 'created',
+                           'sha256':digest(previous) if previous is not None else None})
+        write_json(backup_path/'backup_manifest.json',{'mod_id':args.id,'files':backed,'game_tested':False,
+            'note':'Backup taken before an offline copy. Not an in-game test.'})
+    except Exception as exc:
+        _discard_output(backup_path)
+        raise ValueError('Install failed before completion; game files were not changed: '+str(exc)) from exc
+    written=[]
+    try:
+        for rel,data,dest,previous in planned:
+            write_bytes(dest,data); written.append((dest,previous))
+            if digest(read_file(dest))!=digest(data): raise ValueError('Output hash mismatch: '+rel)
+    except Exception as exc:
+        try: _restore_install(written,mods,mods_existed,backup_path)
+        except Exception as restore_exc:
+            raise ValueError('Install failed and restore failed; backup kept at '+str(backup_path)+': '+str(restore_exc)) from exc
+        raise ValueError('Install failed before completion; game files restored: '+str(exc)) from exc
+    print(json.dumps({'copied_files':len(planned),'backup':str(backup_path),'game_tested':False}))
 def discover(args):
     if not re.fullmatch(r'[0-9]+',args.id): raise ValueError('Mod ID must contain decimal digits')
     libraries=set(Path(p).expanduser().resolve() for p in args.library)
@@ -308,6 +422,10 @@ def main():
     p=commands.add_parser('patch'); p.add_argument('--input',required=True); p.add_argument('--plan',required=True); p.add_argument('--output',required=True); p.set_defaults(run=build_overlay)
     p=commands.add_parser('verify'); p.add_argument('--source',required=True); p.add_argument('--overlay',required=True); p.set_defaults(run=verify)
     p=commands.add_parser('package'); p.add_argument('--source',required=True); p.add_argument('--overlay',required=True); p.add_argument('--id',required=True); p.add_argument('--output',required=True); p.add_argument('--reexport-report'); p.set_defaults(run=package)
+    p=commands.add_parser('export',help='Copy LocalizationManager inputs after path preflight. Not an in-game test.')
+    p.add_argument('--game',required=True); p.add_argument('--output',required=True); p.set_defaults(run=export_inputs)
+    p=commands.add_parser('install',help='Copy an overlay into Mods after preflight and a backup. Not an in-game test.')
+    p.add_argument('--game',required=True); p.add_argument('--overlay',required=True); p.add_argument('--id',required=True); p.add_argument('--backup',required=True); p.set_defaults(run=install_overlay)
     args=parser.parse_args()
     try: args.run(args)
     except (ValueError,OSError,KeyError,TypeError,struct.error) as exc: parser.exit(1,'ERROR: '+str(exc)+'\n')
