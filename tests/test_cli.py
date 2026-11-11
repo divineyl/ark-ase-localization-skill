@@ -1,4 +1,4 @@
-import hashlib,json,subprocess,sys,tempfile,unittest,zipfile
+import hashlib,json,subprocess,sys,tempfile,unittest,unittest.mock,zipfile
 from pathlib import Path
 from fixtures import asset,compressed
 SCRIPT=Path(__file__).resolve().parents[1]/'skills'/'ark-ase-localization'/'scripts'/'ase_localize.py'
@@ -126,23 +126,22 @@ class CLITests(unittest.TestCase):
             report['missing']=[{'path':'example.uasset'}]
             (root/'partial.json').write_text(json.dumps(report),encoding='utf-8')
             self.run_cli('package','--source',source,'--overlay',root/'overlay','--id','42','--output',root/'partial.zip','--reexport-report',root/'partial.json',ok=False)
-            tool=root/'exporter.py'
-            tool.write_text('#!/usr/bin/env python3\nimport pathlib,sys\nasset=pathlib.Path(sys.argv[2])\n'
-                            'pathlib.Path(str(asset)+".txt").write_text("k=信息\\n",encoding="utf-8")\n',encoding='utf-8')
-            tool.chmod(0o755)
-            result=subprocess.run([sys.executable,str(REEXPORT),'--tool',tool,'--overlay',root/'overlay','--work',root/'tool-check'],
-                                  capture_output=True,text=True,encoding='utf-8')
-            self.assertEqual(result.returncode,0,result.stderr)
+            scripts=str(REEXPORT.parent)
+            if scripts not in sys.path: sys.path.insert(0,scripts)
+            import tool_reexport
+            tool=root/'UE4localizationsTool.exe'; tool.write_bytes(b'MZ-stand-in')
+            def reexport(work,text=None,code=0):
+                def fake_run(cmd,**kwargs):
+                    self.assertEqual(cmd[0],str(tool)); self.assertEqual(cmd[1],'export'); self.assertEqual(cmd[3],'-m2')
+                    if text is not None: Path(str(cmd[2])+'.txt').write_text(text,encoding='utf-8')
+                    return subprocess.CompletedProcess(cmd,code)
+                argv=['tool_reexport.py','--tool',str(tool),'--overlay',str(root/'overlay'),'--work',str(work)]
+                with unittest.mock.patch.object(tool_reexport.subprocess,'run',fake_run), unittest.mock.patch.object(sys,'argv',argv):
+                    return tool_reexport.main()
+            self.assertEqual(reexport(root/'tool-check','k=信息\n'),0)
             self.assertEqual(json.loads((root/'tool-check'/'reexport_report.json').read_text(encoding='utf-8'))['matched_fields'],1)
-            tool.write_text('#!/usr/bin/env python3\nimport pathlib,sys\nasset=pathlib.Path(sys.argv[2])\n'
-                            'pathlib.Path(str(asset)+".txt").write_text("k=missing\\n",encoding="utf-8")\n',encoding='utf-8')
-            missed=subprocess.run([sys.executable,str(REEXPORT),'--tool',tool,'--overlay',root/'overlay','--work',root/'tool-miss'],
-                                  capture_output=True,text=True,encoding='utf-8')
-            self.assertEqual(missed.returncode,1)
+            self.assertEqual(reexport(root/'tool-miss','k=missing\n'),1)
             self.assertEqual(len(json.loads((root/'tool-miss'/'reexport_report.json').read_text(encoding='utf-8'))['missing']),1)
-            tool.write_text('#!/usr/bin/env python3\nimport sys\nsys.exit(2)\n',encoding='utf-8')
-            failed=subprocess.run([sys.executable,str(REEXPORT),'--tool',tool,'--overlay',root/'overlay','--work',root/'tool-fail'],
-                                  capture_output=True,text=True,encoding='utf-8')
-            self.assertEqual(failed.returncode,1)
+            self.assertEqual(reexport(root/'tool-fail',code=2),1)
             self.assertEqual(len(json.loads((root/'tool-fail'/'reexport_report.json').read_text(encoding='utf-8'))['failures']),1)
             self.assertEqual((source/'example.uasset').read_bytes(),asset(404))
