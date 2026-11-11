@@ -1,4 +1,4 @@
 interface:
   display_name: "方舟 ASE 模组汉化"
-  short_description: "方舟进化模组汉化、UI文本提取、资源写回与覆盖补丁验证"
-  default_prompt: "使用 $ark-ase-localization 汉化我提供的 ASE 模组，并提供清单、验证报告和可回滚补丁。"
+  short_description: "提取方舟进化 ASE 模组的显示文字，按位置写回，并生成可回滚覆盖补丁"
+  default_prompt: "使用 $ark-ase-localization 处理我提供的 ASE 模组。只为 display_candidate 为 true 且审阅过的显示文字填写译文，保留内部标识和原文定位。请给出译文清单、未覆盖项、验证结果和可回滚覆盖补丁；没有独立导出工具时把该项标为 not_run，不要把补丁写入游戏目录。"

@@ -39,6 +39,12 @@ int32 长度为正时按单字节字符计（包含 NUL），为负时按 UTF-16
 
 本脚本只对这一已证实结构递归。未知 Struct、Map、其他 Array 保留原 payload，不扫描其中的“看起来像字符串”的字节来写回。
 
+## 这些规则写在哪里
+
+`scripts/ase_layout.py` 的 `PROFILES` 只登记上面两段 24 字节前缀，并保存名称表起点和 bulk 字段偏移。`Asset` 继续检查 header size、文件夹 `None`、七个表整数、import 28 字节、export 68 字节、导出范围、名称表结尾、bulk 起点和 4 字节尾标记。`properties` 只对 `BuffDescription` 且结构类型为 `StatusValueModifierDescription` 的节点递归，深度上限 8。正长度 FString 按 CP1252 读取，负长度按 UTF-16LE 读取，单条上限 16,000,000 字节。
+
+写回和 `.z` 解压在 `scripts/ase_assets.py`。命令行只接受这两种布局，其他文件整份拒绝。调整偏移前先让现有合成样本失败，再改 `tests/fixtures.py` 里的对应常数。
+
 ## 最小修改原则
 
 重建目标导出块的已识别属性及其原始尾部。名称表、import、未修改的属性 payload、未知尾部和其他 export 均保留；只调整有证据需要调整的长度/偏移字段。

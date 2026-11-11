@@ -31,3 +31,9 @@ Skill frontmatter 已通过创建器的 quick_validate 检查。开源目录完�
 同日后续游戏内反馈：安装并重启后，ZH 和 EN 均仍显示部分键名。模组专用字节码修复在副本上检查了 7 个资源、22 个等长字面量身份改动的可逆性和涉及函数的解析、脚本长度及跳转；随后安装并备份。用户提供的截图显示该图鉴页面的中英文标题、按钮与提示正常；对缺失的 `Canbetames:` 项另补 EN/ZH 后，用户确认中文“可驯服：”。`Region #` 和所有其他页面未逐项验证。
 
 包含这两次改动的新包有 62 个资源。安装器在隔离目录测试了原版与上一版汉化升级、备份、幂等、输出哈希和未知版本拒绝，ZIP 内容哈希与清单匹配。这些是一次性案例测试，通用 CLI 不支持 Kismet 字节码修改，历史的 60 文件独立重导出结论不能自动延伸至后续字节码改动。
+
+## 文档对照（2026-11-11）
+
+在 Linux 上用 Python 3.12.3 执行 `python3 -m unittest discover -s tests -v`，14 项通过。对照 `ase_localize.py` 各子命令的 `--help`、一次合成资源的 `unpack`/`extract` 输出，以及 `DISPLAY_KEYS` / `JSON_FIELDS` 的源码，核对了 README、`SKILL.md` 和参考页。核对结果写进了文档：`.umap` 只解压不提取，`discover` 没有候选时仍退出 0，提取记录最初没有 `translation`，未提供独立报告时归档状态为 `not_run`。
+
+这次没有重跑真实模组回归，也没有游戏内测试。`docs/validation-summary.json` 仍是 2026-10-26 的记录。
