@@ -30,13 +30,20 @@ UMG 不只存于 `Default__`：控件实例、WidgetTree 和枚举显示文本�
 }
 ```
 
-`NLLabel` 是直接显示文字时可以翻译。`EventUID`、`BindValue`、`Permission`、资源路径、数值、枚举 ID、数据源名称、控件类别和 JSON 键本身保持原值。
+`NLLabel`、`Label`、`Text`、`Title`、`Note`、`HintText`、`Placeholder` 以及带 `NL` 前缀的同名叶子，在确认为直接显示文字时可以翻译。`EventUID`、`BindValue`、`BindText`、`Permission`、资源路径、数值、枚举 ID、数据源名称、控件类别和 JSON 键本身保持原值。
 
-但 `"NLLabel":"_SPAWN_IN_FRONT_"` 是查表 token，不是显示英语。保留 token，翻译语言表中的对应值。有些原版 token 缺少末尾下划线，不要仅用完整首尾下划线判断。
+整段值如果是查表 token，就不是显示英语。保留 token，只翻译语言表里的对应值。写入器会拒绝改动下面两类整段值，无论它出现在显示叶子还是普通字符串里：
 
-下拉框的 `Name` 只有在它是带 `EnumID` 的显示项时才可改；权限组名称、DataSource.Name 等不能见到 Name 就翻译。应递归比较修改前后 JSON，确保非显示叶子、键集合、数组顺序和类型不变。
+- 旧表形式：`_YES_`、`_SPAWN_IN_FRONT`。可以没有结尾下划线，但必须整段是下划线加多位大写、数字或下划线。`YES_` 这种没有开头下划线的文本不会被当成 token。
+- 公开导入器形式：`$$范围$:$KEY`，例如 `$$Ark-Nucleus$:$OK_BTN`。范围里可以有连字符，键可以有下划线。这是 [Ark Nucleus JSON 导入器](https://github.com/ArkNucleus/Ark-Nucleus-JSONs) 写进界面 JSON 的引用，不是一句英文。
 
-附带脚本对白名单 JSON 字段进行结构比较。新增 schema 需要先给出字段语义和测试，不能用“关闭所有 JSON 验证”绕过。
+`Canbetames:` 这类经过空格删除后才拿去查表的短句，没有统一的外形。脚本不会靠冒号猜测它是 token。要按具体版本的查表函数单独判断。
+
+以 `/Game/`、`/Script/` 或 `/Ark-Nucleus/` 开头的整段路径同样保留。下拉框的 `Name` 只有在它是带 `EnumID` 的显示项时才可改；若这个 `Name` 本身是 token，仍然保留。权限组名称、DataSource.Name 等不能见到 Name 就翻译。应递归比较修改前后 JSON，确保非显示叶子、键集合、数组顺序和类型不变。
+
+FText 只把 `Text`、`HintText`、`ToolTipText`、`TooltipText` 当作显示候选。`ButtonText` 只在它是普通字符串属性时可以翻译；同名 FText 不会被当成已证实的 UMG 字段。
+
+附带脚本对白名单 JSON 字段进行结构比较。除了已观察到的 `Nucleus_StaticUIConfig`、`UIConfig_*` 等旧字段，公开导入器写成单个 JSON 字符串的界面属性也使用同一套叶子规则，包括 `N_BaseWidget_StaticUIConfig`、`N_Basic_MainUI`、`DU_Item_ModalUIConfig`、`Nucleus_CONST_TabButtonUIConfig`。新增 schema 需要先给出字段语义和测试，不能用“关闭所有 JSON 验证”绕过。
 
 ## Nucleus 语言表
 
@@ -52,9 +59,20 @@ UMG 不只存于 `Default__`：控件实例、WidgetTree 和枚举显示文本�
 
 保留 `EN` 和 `Key`，添加/更新 `ZH`。不要为快速显示中文而把整个英文语言表替换掉。用户未必选择了 ZH，已有客户端设置也可能保留 EN；安装说明必须告诉用户选择“中文 / ZH”。
 
+公开语言文件还使用另一种形状：词条键对应 `{ "en": "Yes", "zh": "是" }`，外层可以再套一层分类，例如 `SERVER`。`Nucleus_ServerLocalization_Default` 和 `MyMod_LocalizationStrings` 按这个形状处理。只允许添加、删除或修改 `zh`；`en`、`de`、`zh-TW` 以及其他语言代码保持原值，也不能新增词条。`zh` 里的 `__0__` 必须和同一条 `en` 一致。语言下拉的显示名放在 `Languages` 或 `N_EditLangDrop_SupportedLanguages`，只允许改 `zh` / `ZH` 的 `Name` 和 `NativeName`。
+
 如果用户选择让新配置默认中文，可以在计划顶层显式设置 `allow_language_default: true`，只改变 `MOD_ClientSettings.CoreClientSettings.Language` 的 EN/ZH；脚本不会因此改动其他设置、权限或已有存档。
 
 原表可能重复使用 Key。先按具体源条目和绑定分析，不能在字典去重后无声丢失一条。缺失 token 的新增需要单独审阅，附带写入器默认保持原有语言项数量，避免在“翻译”中悄悄新增运行内容。
+
+下面这些属性在公开导入器里是字典或映射，不是一段 JSON 字符串。当前写入器不修改它们，遇到时保留并列入未覆盖：
+
+- `MyMod_LocStrings`：按分类存放的语言 JSON。
+- `MyMod_PermissionTags`：权限名到 token 的映射。
+- `MyMod_DefaultClientSettings`、`MyMod_DefaultServerSettings`、`MyMod_DefaultPlayerServerSettings`：分类设置映射。
+- `Nucleus_Edit_Widgets`：控件映射。
+
+设置里的 `LABEL`、`DESCRIPTION`、`CATEGORY_NAME`、`CATEGORY_DESC` 在已公开的文件中是 `$$范围$:$KEY` token，真正的句子在语言表。不要把这些键名加进显示白名单后来就地翻译。
 
 ### 语言键直接显示时的排查
 

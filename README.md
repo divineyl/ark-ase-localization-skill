@@ -75,7 +75,7 @@ python scripts/tool_reexport.py --tool "/path/to/UE4localizationsTool.exe" --ove
 python -m unittest discover -s tests -v
 ```
 
-测试运行时生成的样本是合成的包形数据，不是可装入游戏的资源。覆盖两种 profile、嵌套 Buff、FText 身份保持、数组文本、同译文碰撞、JSON 执行字段保护、缓存损坏、路径越界、源件哈希、覆盖包损坏和归档校验。
+测试运行时生成的样本是合成的包形数据，不是可装入游戏的资源。覆盖两种 profile、嵌套 Buff、FText 身份保持、数组文本、同译文碰撞、JSON 执行字段保护、查表 token、语言表 `zh`、缓存损坏、路径越界、源件哈希、独立重导出报告、覆盖包损坏和归档校验。
 
 [验证记录](docs/VALIDATION.md)区分自动测试、代理应用测试、本地原件回归与游戏测试。**离线检查通过不代表游戏中的所有文字、布局和功能都已验证。**
 
