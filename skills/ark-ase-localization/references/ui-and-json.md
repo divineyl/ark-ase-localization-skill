@@ -36,7 +36,16 @@ UMG 不只存于 `Default__`：控件实例、WidgetTree 和枚举显示文本�
 
 下拉框的 `Name` 只有在它是带 `EnumID` 的显示项时才可改；权限组名称、DataSource.Name 等不能见到 Name 就翻译。应递归比较修改前后 JSON，确保非显示叶子、键集合、数组顺序和类型不变。
 
-附带脚本对白名单 JSON 字段进行结构比较。新增 schema 需要先给出字段语义和测试，不能用“关闭所有 JSON 验证”绕过。
+附带脚本对白名单 JSON 字段进行结构比较。字段名是否可写以 [流程里的白名单](workflow.md#可写字段) 为准。新增 schema 需要先给出字段语义和测试，不能用“关闭所有 JSON 验证”绕过。
+
+写入器对改过的 JSON 做这些强制检查：
+
+- 键集合、数组长度和 JSON 类型保持不变。`MOD_LocalizationString` 的 `LStrings` 条数也保持不变；缺词条要单独审阅后再考虑，不能在同一次翻译里追加或删除条目。
+- 语言表只允许新增或更新字符串类型的 `ZH`。`Key`、`EN` 和其他非 `ZH` 字段保持原值。`ZH` 里的 `__数字__` 与对应条目的 `EN` 对照，不把整段 JSON 当作一句文本。
+- 其他 JSON 里可以直接改的叶子名是 `NLText`、`NLLabel`、`NLTitle`、`NLNote`、`Text`、`Label`、`Title`、`Note`、`HintText`、`Placeholder`。`Name` 只有在同一对象含有 `EnumID` 时可以改。
+- `Languages` 只允许改 `ZH.Name` 和 `ZH.NativeName`。
+- `MOD_ClientSettings` 只有在计划顶层 `allow_language_default` 为 `true` 时，可以把 `CoreClientSettings.Language` 在 `EN` 和 `ZH` 之间切换。
+- 以 `/Game/` 开头的字符串，以及整段匹配 `_[A-Z0-9_]+` 的查表 token，即使叶子名在显示名单里也保持原样。
 
 ## Nucleus 语言表
 
