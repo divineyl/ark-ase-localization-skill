@@ -132,7 +132,8 @@ class CLITests(unittest.TestCase):
             tool=root/'UE4localizationsTool.exe'; tool.write_bytes(b'MZ-stand-in')
             def reexport(work,text=None,code=0):
                 def fake_run(cmd,**kwargs):
-                    self.assertEqual(cmd[0],str(tool)); self.assertEqual(cmd[1],'export'); self.assertEqual(cmd[3],'-m2')
+                    self.assertEqual(Path(cmd[0]).resolve(),tool.resolve())
+                    self.assertEqual([cmd[1],cmd[3]],['export','-m2'])
                     if text is not None: Path(str(cmd[2])+'.txt').write_text(text,encoding='utf-8')
                     return subprocess.CompletedProcess(cmd,code)
                 argv=['tool_reexport.py','--tool',str(tool),'--overlay',str(root/'overlay'),'--work',str(work)]
